@@ -2,6 +2,14 @@
 #include <Arduino.h>
 
 /**
+ * TODOs general
+ * TODO: incluir ecuación de diferencias para hacer simulaciones sin el motor.
+ * TODO: hacer un código generalizado que halle cuando se ha logrado el estado
+ *       estable
+ * 
+ */
+
+/**
  * TODO: hacer que el código en todas partes trabaje en segundos
  */
 using millis_t = unsigned long;
@@ -9,11 +17,8 @@ using millis_t = unsigned long;
 struct Rect {
   double m;
   double b;
-
-
   
   public:
-
   /**
    * \brief Constructor para la clase Rect.
    * Hacemos una recta a partir de un punto y la pendiente.
@@ -31,6 +36,7 @@ struct Rect {
 /**
  * TODO: definir bien la clase del controlador PID
  * TODO: generalizar para los otros controladores (si se puede)
+ * 
  */
 class pidController {
   constexpr double KP = 0.03, KI = 0.6, KD = 0.6E-3; /** TODO: poner los valores que encontremos nosotros */
@@ -164,7 +170,7 @@ namespace time {
 }
 constexpr int16_t MAX_OUT_VALUE = 255;
 
-bool antiwindup;
+bool antiwindup; /** TODO: incluir en la clase del PID */
 
 void setup() {
   Serial.begin(115200);
@@ -178,7 +184,6 @@ void setup() {
 }
 
 void loop() {
-  // Ejemplo de uso con valores ADC directos
   millis_t current = millis();
   static millis_t last = 0;
   if (current - last >= time::SAMPLE_PERIOD) {
