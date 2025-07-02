@@ -1,18 +1,28 @@
+#include <cmath>
 #include <Arduino.h>
 
-constexpr double KP = 0.48, KI = 0.055, KD = 8E-7; // Nota: KI y KD reducidos para escala ADC
-constexpr double TI = 1.0 / KI, TD = 1.0 / KD; /** TODO: verificar definiciones de TD y TI */
-const double KR = 1.0 / sqrt(TI*TD); // Ganancia de rastreo/antiwindup
+using millis_t = unsigned long;
+
+namespace ctrl {
+  constexpr double KP = 0.03, KI = 0.6, KD = 0.6E-3; /** TODO: poner los valores que encontremos nosotros */
+  constexpr double TI = KI / KP, TD = KD / KP;
+  constexpr double KR = 1.0 / std::sqrt(TI*TD); /*< Ganancia de rastreo/antiwindup */ 
+}
+
+
+namespace pin {
+  constexpr int MOTOR_MISO = 5;
+  constexpr int MOTOR_MOSI = 6;
+}
+
+namespace time {
+  constexpr millis_t SAMPLE_PERIOD = 10; /** TODO: ver el maximo valor adecuado */
+}
 constexpr int16_t MAX_OUT_VALUE = 255;
 
-constexpr int CONTROL_MISO_PIN = 5;
-constexpr int CONTROL_MOSI_PIN = 6;
-constexpr unsigned long SAMPLE_PERIOD = 10; /** TODO: ver el maximo valor adecuado */
-constexpr int PWM_CHANNEL = 0;
-constexpr int PWM_FREQ = 5000;     // 5kHz - mucho más rápido que actualización
-constexpr int PWM_RESOLUTION = 8;  // 8 bits para simplicidad (0-255)
-
 bool antiwindup;
+
+
 
 /**
  * \brief Controlador PID simple para un motor DC.
@@ -31,7 +41,7 @@ pid_controller(int16_t error)
   const int16_t derivative = error - previous_error;
   previous_error = error;
 
-  long output = (long)(KP*error) + (long)(KI*integral) + (long)(KD*derivative);
+  long output = (long)(ctrl::KP*error) + (long)(ctrl::KI*integral) + (long)(ctrl::KD*derivative);
 
   bool windup = (output > MAX_OUT_VALUE || output < 0);
   if (windup) {
@@ -39,10 +49,10 @@ pid_controller(int16_t error)
     integral = 0;
     previous_error = 0;
     if (antiwindup) {
-      const long antiwindup_feedback = (long)(KR * (output - MAX_OUT_VALUE));
-      output = (long)(KP*error) +
-               (long)((KI + antiwindup_feedback)*integral) +
-               (long)(KD*derivative);
+      const long antiwindup_feedback = (long)(ctrl::KR * (output - MAX_OUT_VALUE));
+      output = (long)(ctrl::KP*error) +
+               (long)((ctrl::KI + antiwindup_feedback)*integral) +
+               (long)(ctrl::KD*derivative);
     }
     output = (output > MAX_OUT_VALUE) ? MAX_OUT_VALUE : 0; // Limitar a 0 si es negativo
   }
@@ -51,26 +61,28 @@ pid_controller(int16_t error)
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  pinMode(pin::MOTOR_MISO, INPUT);
+  pinMode(pin::MOTOR_MOSI, OUTPUT);
 
-  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttachPin(CONTROL_MOSI_PIN, PWM_CHANNEL);
+  analogReadResolution(10); // Para compatibilidad con Arduino UNO
+
+  analogWriteFrequency(pin::MOTOR_MOSI, 500);
+  analogWriteResolution(pin::MOTOR_MOSI, 8);
 }
 
 void loop() {
   // Ejemplo de uso con valores ADC directos
-  unsigned long current_millis = millis();
-  static unsigned long last_millis = 0;
-  const int16_t ref = (sin(2 * PI * 0.5 * (current_millis / 1000.0)) > 0.0) * (0.5 * MAX_OUT_VALUE);
-  if (current_millis - last_millis >= SAMPLE_PERIOD) {
-    last_millis = current_millis;
-    Serial.printf("Referencia: %d\n", ref);
-    const int16_t actual = analogRead(CONTROL_MISO_PIN);
+  millis_t current = millis();
+  static millis_t last = 0;
+  if (current - last >= time::SAMPLE_PERIOD) {
+    const int16_t ref = (sin(2*PI * 0.5*(current / 1000.0)) > 0) * (0.5 * MAX_OUT_VALUE);
+    last = current;
+    const int16_t actual = analogRead(pin::MOTOR_MISO);
     const int16_t error =  ref - actual;
 
     const int16_t control_output = pid_controller(error);
-    //const int16_t control_output = ref;
-    ledcWrite(PWM_CHANNEL, control_output);
-    Serial.printf("Actual: %d, Error: %d, Control Output: %d\n", actual, error, control_output);
+    analogWrite(pin::MOTOR_MOSI, control_output);
+    Serial.printf("ref: %d, vel: %d, e: %d, pid: %d\n", ref, actual, error, control_output);
   }
 }
