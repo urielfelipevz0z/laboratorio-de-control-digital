@@ -49,7 +49,7 @@ pid_controller(int16_t error)
     integral = 0;
     previous_error = 0;
     if (antiwindup) {
-      const long antiwindup_feedback = (long)(ctrl::KR * (output - MAX_OUT_VALUE));
+      const long antiwindup_feedback = (long)(ctrl::KR * (MAX_OUT_VALUE - output));
       output = (long)(ctrl::KP*error) +
                (long)((ctrl::KI + antiwindup_feedback)*integral) +
                (long)(ctrl::KD*derivative);
