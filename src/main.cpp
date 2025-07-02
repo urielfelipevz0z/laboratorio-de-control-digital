@@ -2,17 +2,23 @@
 #include <Arduino.h>
 
 /**
- * TODOs general
  * TODO: incluir ecuación de diferencias para hacer simulaciones sin el motor.
- * TODO: hacer un código generalizado que halle cuando se ha logrado el estado
- *       estable
- * 
+ * TODO: Hacer que la recopilación de muestras se detenga cuando hemos llegado al
+ *       estado estable para Takahashi-Chan-Auslander y optimización genética
+ * TODO: hacer que el código en todas partes trabaje en segundos y no
+ *       milisegundos
  */
 
-/**
- * TODO: hacer que el código en todas partes trabaje en segundos
- */
 using millis_t = unsigned long;
+namespace pin {
+  constexpr int MOTOR_MISO = 5;
+  constexpr int MOTOR_MOSI = 6;
+}
+
+namespace timing {
+  constexpr millis_t SAMPLE_PERIOD = 10; /** TODO: ver el maximo valor adecuado */
+}
+constexpr int16_t MAX_OUT_VALUE = 255;
 
 struct Rect {
   double m;
@@ -31,44 +37,132 @@ struct Rect {
     this->b = p1.second - m * p1.first;
   }
 
-}
+};
 
 /**
- * TODO: definir bien la clase del controlador PID
- * TODO: generalizar para los otros controladores (si se puede)
- * 
+ * TODO: Generalizar este controlador a ON-OFF y P en la medida de lo posible.
  */
 class pidController {
-  constexpr double KP = 0.03, KI = 0.6, KD = 0.6E-3; /** TODO: poner los valores que encontremos nosotros */
-  constexpr double TI = KI / KP, TD = KD / KP;
-  constexpr double KR = 1.0 / std::sqrt(TI*TD); /*< Ganancia de rastreo/antiwindup */
+private:
+  double k_p;  ///< Ganancia proporcional del PID
+  double k_i;  ///< Ganancia integral del PID  
+  double k_d;  ///< Ganancia derivativa del PID
+  
+  double T_i;  ///< Tiempo integral (Ti = ki/kp) - usado para cálculo de antiwindup
+  double T_d;  ///< Tiempo derivativo (Td = kd/kp) - usado para cálculo de antiwindup
+  double k_r;  ///< Ganancia de rastreo/antiwindup (kr = 1/√(Ti*Td))
 
-  void
-  pid_tune()
+  bool antiwindup = true;  ///< Habilita/deshabilita el mecanismo antiwindup
+
+  /**
+   * \brief Utiliza las reglas de Takahashi-Chan-Auslander para obtener las
+   *        ganancias recomendadas para un PID.
+   */
+  static
+  std::tuple<double, double, double> takahashi(double L, double R, double k)
   {
-    double L; /*< Parámetros L y R en método de Takahashi-Chan-Auslander */
-    int16_t max_slope; /*< Máxima pendiente de la recta */
-    std::pair<double, double> p1; /*< Un punto perteneciente a la recta R */
-    const uint32_t total_test_samples = (millis_t)1000 / time::SAMPLE_PERIOD; /*< Esperamos estabilización antes de 1 segundo en el peor caso*/
+    double k_p, k_i, k_d;
+
+    /**
+     * Ganancia proporcional
+     * 
+     * Fórmula en LaTeX:
+     *   $$ k_p = \frac{1.2}{R(L+h)} - \frac{k}{2} $$
+     */
+    k_p = ((1.2)/(R * (L + timing::SAMPLE_PERIOD/1000.0))) - (k/2);
+
+    /**
+     * Ganancia integral
+     * 
+     * Fórmula en LaTeX:
+     *   $$ k_i = \frac{0.6 h}{R(L + \frac{h}{2})^2} $$
+     */
+    k_i = (0.6*timing::SAMPLE_PERIOD) /
+                (R * std::pow((L + (timing::SAMPLE_PERIOD/1000.0)/2), 2));
+
+    /**
+     * Ganancia derivativa
+     * 
+     * Fórmula en LaTeX:
+     *   $$ k_d = \frac{0.6}{R h} $$
+     */
+    k_d = 0.6 / (R * (timing::SAMPLE_PERIOD / 1000.0));
+
+    return std::make_tuple(k_p, k_i, k_d);
+  }
+
+  /**
+   * \brief Optimiza las ganancias del PID utilizando un algoritmo genético a
+   *        partir de un conjunto de ganancias iniciales.
+   * 
+   * Este método toma ganancias que deberían de ser buenas para ser tomadas en
+   * la población inicial, más adelante se ejecuta un algoritmo genético probando
+   * la planta con un tiempo máximo de ejecución de un minuto. Probando cerca de
+   * 6 individuos en 8 generaciones en los motores del laboratorio cuando mucho.
+   * 
+   * \note Si se llega a la convergencia antes del minuto esta función termina
+   *       antes.
+   * 
+   * TODO: implementar algoritmo genético de optimización que pruebe el motor
+   *       y determine al mejor de la población, en base al menor coste 
+   *       (tiempo de respuesta + sobreimpulso)
+   */
+  static std::tuple<double, double, double>
+  optimize_genetic(double k_p, double k_i, double k_d)
+  {
+    return std::make_tuple(k_p, k_i, k_d);
+  }
+
+public:
+  /** TODO: poner los valores que encontremos nosotros manualmente*/
+  pidController(double k_p = 0.03, double k_i = 0.6, double k_d = 0.6E-3)
+    : k_p(k_p), k_i(k_i), k_d(k_d)
+  {
+    T_i = k_i / k_p;
+    T_d = k_d / k_p;
+    k_r = 1.0 / std::sqrt(T_i*T_d);
+  }
+
+  /**
+   * \brief Sintoniza el controlador PID en base a la planta a la que está
+   *        conetado.
+   * 
+   * Este método sintoniza el PID utilizando el método de
+   * Takahashi-Chan-Auslander, obteniendo los parámetros L y R empíricamente
+   * desde la planta, por lo que esta función es apta para sintonizar con
+   * plantas de primer y segundo orden.
+   * 
+   * \note Esta función puede tomar su tiempo en ejecutarse, debido a la
+   *       posible lentitud de la planta
+   *
+   */
+  void
+  tune()
+  {
+    
+    const uint32_t total_test_samples = (millis_t)1000 / timing::SAMPLE_PERIOD; /*< Esperamos estabilización antes de 1 segundo en el peor caso*/
     int16_t samples[total_test_samples]; /*< Esperamos estabilización antes de 1 segundo en el peor caso*/
 
-    int16_t ref = 0.5 * MAX_OUT_VALUE; /*< Valor del escalón de prueba */
+    const int16_t step_magnitude = 0.5 * MAX_OUT_VALUE; /*< Valor del escalón de prueba */
     int16_t steady_value_pre_step = analogRead(pin::MOTOR_MISO);
-    analogWrite(pin::MOTOR_MOSI, ref); /*< Enviamos el escalón al motor */
+    analogWrite(pin::MOTOR_MOSI, step_magnitude); /*< Enviamos el escalón al motor */
+    int16_t max_slope = 0;            /*< Máxima pendiente en la respuesta */
+    std::pair<double, double> p1;     /*< El punto donde se encontró la máxima pendiente */
     int i = 0;
     for (; i < total_test_samples;) {
       static millis_t last = millis();
-      if (millis() - last >= time::SAMPLE_PERIOD) {
-        /**
-         * TODO: detener la recopilación de muestras cuando hemos llegado al
-         *       estado estable
-         */
+      if (millis() - last >= timing::SAMPLE_PERIOD) {
+        
         samples[i] = analogRead(pin::MOTOR_MISO);
 
         if (i > 0) {
           /**
            * Precaución: esto puede dar resultados incorrectos si hay mucho ruido
-           *             y cambios de alta frecuencia imprevistos en la señal.
+           *             y cambios de alta frecuencia imprevistos en la señal, se
+           *             asume que la señal leída es filtrada por software o 
+           *             hardware.
+           * TODO: comparar max_slope con otras pendientes para ver que tengan valores
+           *       similares (para ver que no sea un ruido)
            */
           max_slope = (samples[i] - samples[i-1] > max_slope)? samples[i] - samples[i-1] : max_slope;
           p1 = std::make_pair(i, samples[i]);
@@ -85,9 +179,9 @@ class pidController {
      * listada como $K_I$ en el documento de la práctica 6. Evito nombrarla
      * así para evitar confusiones con la constante $k_i$ del PID.
      */
-    const double k = (steady_value_post_step - steady_value_pre_step) / ref;
+    const double k = (steady_value_post_step - steady_value_pre_step) / step_magnitude;
     Rect R(p1, max_slope);
-    L = R.b / R.m; /*< Obtenemos el momento en que la recta cruza el eje Y */
+    double L = R.b / R.m; /*< Obtenemos el momento en que la recta cruza el eje Y */
 
     /**
      * Asignamos las ganancias del PID con el método de Takahashi-Chan-Auslander.
@@ -95,82 +189,55 @@ class pidController {
      * Estos valores serán más adelante ajustados con algún otro algoritmo
      * de optimización.
      */
+    std::tie(k_p, k_i, k_d) = takahashi(L, R.m, k);
 
-    /**
-     * Ganancia proporcional
-     * 
-     * Fórmula en LaTeX:
-     *   $$ k_p = \frac{1.2}{R(L+h)} - \frac{k}{2} $$
-     */
-    this->k_p = ((1.2)/(R.m * (L + time::SAMPLE_PERIOD/1000.0))) - (k/2);
+    std::tie(k_p, k_i, k_d) = optimize_genetic(k_p, k_i, k_d);
 
-    /**
-     * Ganancia integral
-     * 
-     * Fórmula en LaTeX:
-     *   $$ k_i = \frac{0.6 h}{R(L + \frac{h}{2})^2} $$
-     */
-    this->k_i = (0.6*time::SAMPLE_PERIOD) /
-                (R.m * std::pow((L + (time::SAMPLE_PERIOD/1000.0)/2), 2));
-
-    /**
-     * Ganancia derivativa
-     * 
-     * Fórmula en LaTeX:
-     *   $$ k_d = \frac{0.6}{R h} $$
-     */
-    this->k_d = 0.6 / (R.m * (time::SAMPLE_PERIOD / 1000.0));
   }
 
   /**
-   * \brief Controlador PID simple para un motor DC.
-   * \param error La diferencia entre el valor deseado y el actual (setpoint - actual).
-   * \return La salida del controlador PID, limitada al rango del ADC.
-   * \note No tomamos en consideracion que el motor pueda ir en reversa,
-   *       todos los valores son para que vaya adelante.
+   * \brief Obtiene la salida del controlador PID dado un error de entrada
+   * \param error La diferencia entre el valor deseado y el actual 
+   *        (setpoint - actual).
+   * \return La señal del control generada por el PID, limitada al rango del
+   *         ADC y lista para ser enviada a la planta.
+   * 
+   * \note Todos los valores entregados son considerados como voltajes
+   *       positivos para la planta, por lo que este PID como tal no puede
+   *       decirle a un motor que vaya hacia atrás.
+   * 
+   * TODO: ¿Cómo es que deberíamos manejar correcciones negativas del PID?
+   *       El PID puede indicar ir en reversa pero nosotros como tal no
+   *       podemos indicar eso.
    */
   int16_t
-  pid_controller(int16_t error)
+  operator()(int16_t error)
   {
     static long integral = 0;
     static int16_t previous_error = 0;
 
     integral += error;
-    const int16_t derivative = error - previous_error;
+    /** DUDA: ¿la derivada discreta requiere que restemos la diferencia de tiempos? */
+    const int16_t derivative = (error - previous_error) / (timing::SAMPLE_PERIOD / 1000.0);
     previous_error = error;
 
-    long output = (long)(ctrl::KP*error) + (long)(ctrl::KI*integral) + (long)(ctrl::KD*derivative);
+    long control_signal = (long)(k_p*error) + (long)(k_i*integral) +
+                  (long)(k_d*derivative);
 
-    bool windup = (output > MAX_OUT_VALUE || output < 0);
-    if (windup) {
-      // Si hay windup, reiniciar integral y derivada
-      integral = 0;
-      previous_error = 0;
-      if (antiwindup) {
-        const long antiwindup_feedback = (long)(ctrl::KR * (MAX_OUT_VALUE - output));
-        output = (long)(ctrl::KP*error) +
-                (long)((ctrl::KI + antiwindup_feedback)*integral) +
-                (long)(ctrl::KD*derivative);
-      }
-      output = (output > MAX_OUT_VALUE) ? MAX_OUT_VALUE : 0; // Limitar a 0 si es negativo
+    bool windup_ocurred = (control_signal > MAX_OUT_VALUE || control_signal < 0);
+    if (windup_ocurred && antiwindup) {
+      /* Este de aquí debería ser casi siempre negativo */
+      const long antiwindup_feedback = (long)(k_r * (MAX_OUT_VALUE - control_signal));
+      control_signal = (long)(k_p*error) +
+               (long)((k_i + antiwindup_feedback)*integral) +
+               (long)(k_d*derivative);
+      /** DUDA: ¿Tenemos que hacer esto? No veo por qué */
+      //control_signal = (control_signal > MAX_OUT_VALUE) ? MAX_OUT_VALUE : 0; // Limitar a 0 si es negativo
     }
 
-    return output;
+    return control_signal;
   }
-}
-
-
-namespace pin {
-  constexpr int MOTOR_MISO = 5;
-  constexpr int MOTOR_MOSI = 6;
-}
-
-namespace time {
-  constexpr millis_t SAMPLE_PERIOD = 10; /** TODO: ver el maximo valor adecuado */
-}
-constexpr int16_t MAX_OUT_VALUE = 255;
-
-bool antiwindup; /** TODO: incluir en la clase del PID */
+};
 
 void setup() {
   Serial.begin(115200);
@@ -184,15 +251,17 @@ void setup() {
 }
 
 void loop() {
+  static pidController pid;
+
   millis_t current = millis();
   static millis_t last = 0;
-  if (current - last >= time::SAMPLE_PERIOD) {
+  if (current - last >= timing::SAMPLE_PERIOD) {
     const int16_t ref = (sin(2*PI * 0.5*(current / 1000.0)) > 0) * (0.5 * MAX_OUT_VALUE);
     last = current;
     const int16_t actual = analogRead(pin::MOTOR_MISO);
     const int16_t error =  ref - actual;
 
-    const int16_t control_output = pid_controller(error);
+    const int16_t control_output = pid(error);
     analogWrite(pin::MOTOR_MOSI, control_output);
     Serial.printf("ref: %d, vel: %d, e: %d, pid: %d\n", ref, actual, error, control_output);
   }
