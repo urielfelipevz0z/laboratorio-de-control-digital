@@ -7,6 +7,7 @@
  *       estado estable para Takahashi-Chan-Auslander y optimización genética
  * TODO: hacer que el código en todas partes trabaje en segundos y no
  *       milisegundos
+ * TODO: Hacer que MISO sea filtrado por un filtro con $f_c = 50 \text{Hz}$
  */
 
 using millis_t = unsigned long;
