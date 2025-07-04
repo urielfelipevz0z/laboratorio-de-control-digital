@@ -113,6 +113,33 @@ private:
     return std::make_tuple(k_p, k_i, k_d);
   }
 
+  /**
+   * \brief Realiza una derivada discreta sucia a partir de las muestras
+   *        que va recibiendo continuamente.
+   * 
+   * Esta se trata de una ecuación en diferencias que representa un filtro
+   * pasa bajas con $f_c = 50 \text{Hz}$ para evitar que la derivada se
+   * dispare, y claro, realizamos la derivada después de filtrar la entrada.
+   * Esto está representado en una ecuación de diferencias calculada de forma
+   * analítica partiendo de $T=0.01$
+   * $$ y(k) = 0.04321y(k-1) + 95.6786r(k) - 95.6786r(k-1) $$
+   * 
+   * TODO: Verificar que la ecuación de diferencias es correcta, en caso de
+   *       que no usar la derivada sucia del profesor.
+   * 
+   * \return La pendiente actual sin ruidos
+   */
+  int16_t
+  num_derivative(int16_t curr_in)
+  {
+    static int16_t last_y = 0;
+    static int16_t last_in = 0;
+    int16_t   y = 0.04321 * last_y + 95.6786 * curr_in - 95.6786 * last_in;
+    last_y = y;
+    last_in = curr_in;
+    return y;
+  }
+
 public:
   /** TODO: poner los valores que encontremos nosotros manualmente*/
   pidController(double k_p = 0.03, double k_i = 0.6, double k_d = 0.6E-3)
@@ -156,15 +183,10 @@ public:
         samples[i] = analogRead(pin::MOTOR_MISO);
 
         if (i > 0) {
-          /**
-           * Precaución: esto puede dar resultados incorrectos si hay mucho ruido
-           *             y cambios de alta frecuencia imprevistos en la señal, se
-           *             asume que la señal leída es filtrada por software o 
-           *             hardware.
-           * TODO: comparar max_slope con otras pendientes para ver que tengan valores
-           *       similares (para ver que no sea un ruido)
-           */
-          max_slope = (samples[i] - samples[i-1] > max_slope)? samples[i] - samples[i-1] : max_slope;
+          int16_t slope = num_derivative(samples[i]);
+          if (slope > max_slope) {
+            max_slope = slope;
+          }
           p1 = std::make_pair(i, samples[i]);
         }
         i += 1;
