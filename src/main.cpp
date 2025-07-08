@@ -19,12 +19,12 @@ void setup() {
 
   analogReadResolution(10); // Para compatibilidad con Arduino UNO
 
-  analogWriteFrequency(pin::MOSI, 500);
-  analogWriteResolution(pin::MOSI, 8);
+  analogWriteFrequency(500);
+  analogWriteResolution(8);
 }
 
 void loop() {
-  static PidController pid;
+  static PidController pid(4.25, 0.5, 0.25);
 
   millis_t current = millis();
   static millis_t last = 0;

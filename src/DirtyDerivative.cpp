@@ -1,8 +1,8 @@
 #include <Arduino.h>
+#include "filter.hxx"
 
 #include "DirtyDerivative.hxx"
 
-using namespace filter;
 
 /**
  * \brief Crea un derivador sucio listo para recibir valores a partir de la
@@ -30,5 +30,4 @@ DirtyDerivative::operator()(double input)
     const double derivative = (input - last_input) / (timing::SAMPLE_PERIOD / 1000.0) ;
     last_input = input;
     return derivative;
-  }
-};
+}

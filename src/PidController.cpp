@@ -86,9 +86,14 @@ PidController::optimize_genetic(double k_p, double k_i, double k_d)
 PidController::PidController(double k_p, double k_i, double k_d)
 : k_p(k_p), k_i(k_i), k_d(k_d)
 {
-    T_i = k_i / k_p;
-    T_d = k_d / k_p;
-    k_r = 1.0 / std::sqrt(T_i*T_d);
+  if (!(k_p > 0 && k_i >= 0 && k_d >= 0)) {
+    k_p = 3.0;
+    k_i = 1.0;
+    k_d = 1.0; 
+  }
+  T_i = k_i / k_p;
+  T_d = k_d / k_p;
+  k_r = 1.0 / std::sqrt(T_i*T_d);
 }
 
 /**
@@ -113,7 +118,7 @@ PidController::tune()
     const int16_t step_magnitude = 0.5 * MAX_OUT_VALUE; /*< Valor del escalón de prueba */
     int16_t steady_value_pre_step = analogRead(pin::MISO);
     analogWrite(pin::MOSI, step_magnitude); /*< Enviamos el escalón al motor */
-    int16_t max_slope = 0;            /*< Máxima pendiente en la respuesta */
+    double max_slope = 0;            /*< Máxima pendiente en la respuesta */
     std::pair<double, double> p1;     /*< El punto donde se encontró la máxima pendiente */
     int i = 0;
     for (; i < total_test_samples;) {
@@ -123,11 +128,11 @@ PidController::tune()
         samples[i] = analogRead(pin::MISO);
 
         if (i > 0) {
-          int16_t slope = num_derivative(samples[i]);
+          double slope = this->derivative(samples[i]);
           if (slope > max_slope) {
             max_slope = slope;
           }
-          p1 = std::make_pair(i, samples[i]);
+          p1 = std::make_pair(i * timing::SAMPLE_PERIOD / 1000.0, samples[i]);
         }
         i += 1;
         last = millis();
@@ -174,33 +179,28 @@ PidController::tune()
 int16_t
 PidController::operator()(int16_t error)
 {
-    static long integral = 0;
-    static int16_t previous_error = 0;
+    static double integral = 0;
+    
+    // Calcular términos P y D
+    const double derivative = this->derivative(error);
+    const double proportional = k_p * error;
+    const double derivative_term = k_d * derivative;
 
-    /**
-     * Basándonos en el equivalente discreto de la integral para $e(k)$:
-     *   $$ \int_{0}^{kT} e(k) \approx \sum_{i=0}^{k} e(i) T $$
-     * Que en ecuación de diferencias es:
-     *   $$ \text{int}(k) = \text{int}(k-1) + Te(k-1) $$
-     */
-    integral += timing::SAMPLE_PERIOD * error;
-    /** DUDA: ¿la derivada discreta requiere que restemos la diferencia de tiempos? */
-    const int16_t derivative = num_derivative(error);
-    previous_error = error;
-
-    long control_signal = (long)(k_p*error) + (long)(k_i*integral) +
-                  (long)(k_d*derivative);
-
-    bool windup_ocurred = (control_signal > MAX_OUT_VALUE || control_signal < 0);
-    if (windup_ocurred && antiwindup) {
-      /* Este de aquí debería ser casi siempre negativo */
-      const long antiwindup_feedback = (long)(k_r * (MAX_OUT_VALUE - control_signal));
-      control_signal = (long)(k_p*error) +
-               (long)((k_i + antiwindup_feedback)*integral) +
-               (long)(k_d*derivative);
-      /** DUDA: ¿Tenemos que hacer esto? No veo por qué */
-      //control_signal = (control_signal > MAX_OUT_VALUE) ? MAX_OUT_VALUE : 0; // Limitar a 0 si es negativo
+    // Actualizar integral temporalmente
+    integral += (timing::SAMPLE_PERIOD / 1000.0) * error;
+    
+    // Calcular señal de control
+    double control_signal = proportional + (k_i * integral) + derivative_term;
+    
+    // Aplicar saturación
+    const double unsaturated_signal = control_signal;
+    control_signal = constrain(control_signal, 0, MAX_OUT_VALUE);
+    
+    // Anti-windup: Si hay saturación, corregir la integral
+    if (antiwindup && (control_signal != unsaturated_signal)) {
+        const double saturation_error = control_signal - unsaturated_signal;
+        integral += (saturation_error / k_i) * (timing::SAMPLE_PERIOD / 1000.0);
     }
-
-    return control_signal;
+    
+    return (int16_t)control_signal;
 }

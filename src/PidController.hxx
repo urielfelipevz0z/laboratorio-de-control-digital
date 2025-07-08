@@ -1,5 +1,6 @@
 #ifndef PID_CONTROLLER_HXX
 #define PID_CONTROLLER_HXX
+#include "DirtyDerivative.hxx"
 
 /**
  * \brief Controlador PID digital listo para actuar en sistemas de tiempo real
@@ -23,9 +24,10 @@ private:
 
     bool antiwindup = true;  ///< Habilita/deshabilita el mecanismo antiwindup
 
+    DirtyDerivative derivative;
+
     static std::tuple<double, double, double> takahashi(double L, double R, double k);
     static std::tuple<double, double, double> optimize_genetic(double k_p, double k_i, double k_d);
-    int16_t num_derivative(int16_t curr_in);
 
 public:
     PidController(double k_p = 3.0, double k_i = 1.0, double k_d = 1.0);

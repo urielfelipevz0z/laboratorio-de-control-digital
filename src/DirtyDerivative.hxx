@@ -15,11 +15,12 @@
  */
 class DirtyDerivative {
 private:
-  ExpLowPassFilter filter; /**< Filtro para suavizar y evitar picos de ruido */
+  filter::ExpLowPassFilter filter; /**< Filtro para suavizar y evitar picos de ruido */
   double last_input;
 public:
   DirtyDerivative(double cutoff_freq = timing::NYQUIST_FREQ);
   double operator()(double input);
 
+};
 
 #endif // DIRTY_DERIVATIVE_HXX
