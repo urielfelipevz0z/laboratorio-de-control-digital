@@ -16,5 +16,7 @@ namespace timing {
 }
 
 constexpr int16_t MAX_OUT_VALUE = 255;
+constexpr int16_t MAX_IN_VALUE = 4095;
+constexpr double MAX_VOLTAGE = 3.3;
 
 #endif // GLOBALS_HXX

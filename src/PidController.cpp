@@ -188,30 +188,29 @@ PidController::operator()(int16_t error)
 {
     static double integral = 0;
     
-    // Convertir error a double para cálculos de precisión
-    const double error_double = static_cast<double>(error);
-    
     // Sample time in seconds for proper discrete-time PID
     const double dt = timing::SAMPLE_PERIOD / 1000.0;
     
     // Calcular término derivativo usando filtro dedicado
-    const double derivative_val = derivative(error_double);
+    const double derivative_val = derivative(error);
     
     // Calcular términos del PID usando formulación discreta correcta
-    const double proportional = k_p * error_double;
-    const double integral_term = k_i * integral;
+    double integral_term = k_i * integral;
+    const double proportional = k_p * error;
     const double derivative_term = k_d * derivative_val;
 
     // Calcular señal de control
     double control_signal = proportional + integral_term + derivative_term;
-    
     // Aplicar saturación
-    const double unsaturated_signal = control_signal;
+    const double unsaturated_signal = (control_signal * MAX_OUT_VALUE) / 4095.0; // Escalar a rango de 8 bits
+    control_signal = unsaturated_signal; // Asignar señal sin saturación para antiwindup
     control_signal = constrain(control_signal, 0, MAX_OUT_VALUE);
     
     // Anti-windup: solo actualizar integral si no hay saturación
-    if (!antiwindup || (control_signal == unsaturated_signal)) {
-        integral += error_double * dt;  // Correct discrete-time integration
+    if (antiwindup || (control_signal != unsaturated_signal)) {
+        integral_term += (control_signal - unsaturated_signal) * k_r;
+        control_signal = proportional + integral_term + derivative_term;
+        control_signal = constrain(control_signal, 0, MAX_OUT_VALUE);
     }
     
     return (int16_t)control_signal;

@@ -12,14 +12,15 @@ OnOffController::OnOffController(double vh)
 }
 
 int16_t
-OnOffController::operator()(int16_t input) 
-{
+OnOffController::operator()(int16_t error) 
+{   
+  // Implementación del controlador On/Off con histéresis
+  Serial.printf("%d\n", error);
     static int16_t last_output = 0; // Variable estática para mantener estado de histéresis
-    
-    if (input >= (2.5 + vh)) {
+    if (error >= (20)) {
         last_output = MAX_OUT_VALUE; // Activa el controlador
         return last_output;
-    } else if (input <= (2.5 - vh)) {
+    } else if (error <= (-20)) {
         last_output = 0; // Desactiva el controlador
         return last_output;
     } else {

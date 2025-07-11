@@ -17,7 +17,7 @@ namespace filter {
         double last_output;       /**< Última muestra suavizada $y(k-1)$ */
     public:
         ExpLowPassFilter(double cutoff_freq  = timing::NYQUIST_FREQ);
-        double operator()(double input);
+        int16_t operator()(double input);
     };
 }
 

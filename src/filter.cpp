@@ -29,9 +29,10 @@ ExpLowPassFilter::ExpLowPassFilter(double cutoff_freq):
  * \param input La función de entrada en el tiempo actual $x(k)$
  * \return El valor filtrado $y(k)$ a partir de $x(k)$
  */
-double ExpLowPassFilter::operator()(double input)
+int16_t ExpLowPassFilter::operator()(double input)
 {
   last_output = alpha*input + (1 - alpha)*last_output;
-  return last_output;
+  round(last_output); // Redondeamos el valor para evitar errores de precisión
+  return static_cast<int16_t>(last_output);
 }
 } // namespace filter

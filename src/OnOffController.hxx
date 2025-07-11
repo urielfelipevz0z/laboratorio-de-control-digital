@@ -15,7 +15,7 @@ private:
   double vh; /**< Umbral de activación del controlador */
 public:
   OnOffController(double vh = 0.0);
-  int16_t operator()(int16_t input);
+  int16_t operator()(int16_t error);
 };
 
 #endif // ON_OFF_CONTROLLER_HXX
