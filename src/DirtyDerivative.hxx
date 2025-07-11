@@ -18,7 +18,7 @@ private:
   filter::ExpLowPassFilter filter; /**< Filtro para suavizar y evitar picos de ruido */
   double last_input;
 public:
-  DirtyDerivative(double cutoff_freq = timing::NYQUIST_FREQ);
+  DirtyDerivative(double cutoff_freq = 15);
   double operator()(double input);
 
 };

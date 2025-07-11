@@ -1,5 +1,7 @@
 #ifndef PID_CONTROLLER_HXX
 #define PID_CONTROLLER_HXX
+#include <tuple>
+#include <utility>
 #include "DirtyDerivative.hxx"
 
 /**
@@ -22,7 +24,7 @@ private:
     double T_d;  ///< Tiempo derivativo (Td = kd/kp) - usado para cálculo de antiwindup
     double k_r;  ///< Ganancia de rastreo/antiwindup (kr = 1/√(Ti*Td))
 
-    bool antiwindup = true;  ///< Habilita/deshabilita el mecanismo antiwindup
+    bool antiwindup = false;  ///< Habilita/deshabilita el mecanismo antiwindup
 
     DirtyDerivative derivative;
 
@@ -30,8 +32,9 @@ private:
     static std::tuple<double, double, double> optimize_genetic(double k_p, double k_i, double k_d);
 
 public:
-    PidController(double k_p = 3.0, double k_i = 1.0, double k_d = 1.0);
+    PidController(double k_p = 4.25, double k_i = 0.0, double k_d = 0.0);
     void tune();
+    void enableAntiwindup(bool enable = true); ///< Activa/desactiva anti-windup
     int16_t operator()(int16_t error);
 };
 

@@ -1,8 +1,11 @@
 #include <Arduino.h>
+#include <tuple>
+#include <utility>
 
 #include <PidController.hxx>
 #include "globals.hxx"
 #include "filter.hxx"
+#include "DirtyDerivative.hxx"
 
 struct Rect {
   double m;
@@ -82,18 +85,20 @@ PidController::optimize_genetic(double k_p, double k_i, double k_d)
     return std::make_tuple(k_p, k_i, k_d);
 }
 
-/** TODO: poner los valores que encontremos nosotros manualmente*/
+/** Simple PID constructor with basic parameter validation */
 PidController::PidController(double k_p, double k_i, double k_d)
-: k_p(k_p), k_i(k_i), k_d(k_d)
 {
-  if (!(k_p > 0 && k_i >= 0 && k_d >= 0)) {
-    k_p = 3.0;
-    k_i = 1.0;
-    k_d = 1.0; 
-  }
+  // Assign parameters with basic validation
+  this->k_p = (k_p > 0) ? k_p : 4.25;
+  this->k_i = (k_i >= 0) ? k_i : 0.0;
+  this->k_d = (k_d >= 0) ? k_d : 0.0;
+  
   T_i = k_i / k_p;
   T_d = k_d / k_p;
   k_r = 1.0 / std::sqrt(T_i*T_d);
+   
+  // Enable anti-windup by default
+  antiwindup = true;
 }
 
 /**
@@ -117,13 +122,15 @@ PidController::tune()
 
     const int16_t step_magnitude = 0.5 * MAX_OUT_VALUE; /*< Valor del escalón de prueba */
     int16_t steady_value_pre_step = analogRead(pin::MISO);
-    analogWrite(pin::MOSI, step_magnitude); /*< Enviamos el escalón al motor */
+    ledcWrite(0, step_magnitude); /*< Enviamos el escalón al motor usando ledcWrite para ESP32-S3 */
     double max_slope = 0;            /*< Máxima pendiente en la respuesta */
     std::pair<double, double> p1;     /*< El punto donde se encontró la máxima pendiente */
     int i = 0;
+    millis_t start_time = millis();   /*< Tiempo de inicio del test */
+    
     for (; i < total_test_samples;) {
-      static millis_t last = millis();
-      if (millis() - last >= timing::SAMPLE_PERIOD) {
+      millis_t current_time = millis();
+      if (current_time - start_time >= i * timing::SAMPLE_PERIOD) {
         
         samples[i] = analogRead(pin::MISO);
 
@@ -131,15 +138,14 @@ PidController::tune()
           double slope = this->derivative(samples[i]);
           if (slope > max_slope) {
             max_slope = slope;
+            p1 = std::make_pair(i * timing::SAMPLE_PERIOD / 1000.0, samples[i]);
           }
-          p1 = std::make_pair(i * timing::SAMPLE_PERIOD / 1000.0, samples[i]);
         }
         i += 1;
-        last = millis();
       }
     }
     int16_t steady_value_post_step = samples[i - 1];
-    analogWrite(pin::MOSI, 0); /*< Terminamos el escalón de prueba */
+    ledcWrite(0, 0); /*< Terminamos el escalón de prueba usando ledcWrite para ESP32-S3 */
 
     /**
      * k es la ganancia en lazo abierto ante un escalón, según yo esta es la
@@ -162,44 +168,50 @@ PidController::tune()
 }
 
 /**
+ * \brief Activa o desactiva el mecanismo anti-windup del controlador PID
+ * 
+ * \param enable true para activar anti-windup, false para desactivar
+ */
+void PidController::enableAntiwindup(bool enable) {
+    antiwindup = enable;
+}
+
+/**
  * \brief Obtiene la salida del controlador PID dado un error de entrada
  * \param error La diferencia entre el valor deseado y el actual 
  *        (setpoint - actual).
  * \return La señal del control generada por el PID, limitada al rango del
  *         ADC y lista para ser enviada a la planta.
- * 
- * \note Todos los valores entregados son considerados como voltajes
- *       positivos para la planta, por lo que este PID como tal no puede
- *       decirle a un motor que vaya hacia atrás.
- * 
- * TODO: ¿Cómo es que deberíamos manejar correcciones negativas del PID?
- *       El PID puede indicar ir en reversa pero nosotros como tal no
- *       podemos indicar eso.
  */
 int16_t
 PidController::operator()(int16_t error)
 {
     static double integral = 0;
     
-    // Calcular términos P y D
-    const double derivative = this->derivative(error);
-    const double proportional = k_p * error;
-    const double derivative_term = k_d * derivative;
-
-    // Actualizar integral temporalmente
-    integral += (timing::SAMPLE_PERIOD / 1000.0) * error;
+    // Convertir error a double para cálculos de precisión
+    const double error_double = static_cast<double>(error);
     
+    // Sample time in seconds for proper discrete-time PID
+    const double dt = timing::SAMPLE_PERIOD / 1000.0;
+    
+    // Calcular término derivativo usando filtro dedicado
+    const double derivative_val = derivative(error_double);
+    
+    // Calcular términos del PID usando formulación discreta correcta
+    const double proportional = k_p * error_double;
+    const double integral_term = k_i * integral;
+    const double derivative_term = k_d * derivative_val;
+
     // Calcular señal de control
-    double control_signal = proportional + (k_i * integral) + derivative_term;
+    double control_signal = proportional + integral_term + derivative_term;
     
     // Aplicar saturación
     const double unsaturated_signal = control_signal;
     control_signal = constrain(control_signal, 0, MAX_OUT_VALUE);
     
-    // Anti-windup: Si hay saturación, corregir la integral
-    if (antiwindup && (control_signal != unsaturated_signal)) {
-        const double saturation_error = control_signal - unsaturated_signal;
-        integral += (saturation_error / k_i) * (timing::SAMPLE_PERIOD / 1000.0);
+    // Anti-windup: solo actualizar integral si no hay saturación
+    if (!antiwindup || (control_signal == unsaturated_signal)) {
+        integral += error_double * dt;  // Correct discrete-time integration
     }
     
     return (int16_t)control_signal;

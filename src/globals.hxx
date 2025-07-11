@@ -4,7 +4,7 @@
 using millis_t = unsigned long;
 namespace pin {
   constexpr int MISO = 5;
-  constexpr int MOSI = 6;
+  constexpr int MOSI = 4;
 }
 
 namespace timing {

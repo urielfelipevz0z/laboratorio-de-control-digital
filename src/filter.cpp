@@ -12,7 +12,7 @@ namespace filter {
  *        funcionamiento.
  * 
  * Para obtener $\alpha$ usamos la fórmula:
- *   $$ \alpha = e^{-2\pi f_c T} $$
+ *   $$ \alpha = 1 - e^{-2\pi f_c T} $$
  * donde $f_c$ es la frecuencia de corte del filtro y $T$ es el tiempo de
  * muestreo.
  * 
@@ -20,7 +20,7 @@ namespace filter {
  *       frecuencia reconstruible del sistema $f_N$.
  */
 ExpLowPassFilter::ExpLowPassFilter(double cutoff_freq):
-  alpha(exp(- (2.0 * M_PI * cutoff_freq * timing::SAMPLE_PERIOD / 1000.0))),
+  alpha(1.0 - exp(- (2.0 * M_PI * cutoff_freq * timing::SAMPLE_PERIOD / 1000.0))),
   last_output(0) {}
 
 /**
